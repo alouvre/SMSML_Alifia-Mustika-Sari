@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/654564811185346890/f33369ca1d7a42b28bbdd1c5157ba7d8/artifacts
+end_time: 1750391871956
+entry_point_name: ''
+experiment_id: '654564811185346890'
+lifecycle_stage: active
+run_id: f33369ca1d7a42b28bbdd1c5157ba7d8
+run_name: Model_Tunning
+run_uuid: f33369ca1d7a42b28bbdd1c5157ba7d8
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1750391864637
+status: 3
+tags: []
+user_id: User

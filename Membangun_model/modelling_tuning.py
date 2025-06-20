@@ -22,6 +22,7 @@ from mlflow.models.signature import infer_signature
 # ----------------------------------
 mlflow.set_tracking_uri("http://127.0.0.1:5000")
 mlflow.set_experiment("Dropout_Prediction_Submission")
+mlflow.autolog(disable=True)  # Nonaktifkan autolog agar tidak bentrok saat log manual
 
 
 # ----------------------------------
@@ -42,22 +43,6 @@ def log_classification_report(y_true, y_pred, filename="classification_report.js
     mlflow.log_artifact(filename)
 
 
-# Simpan confusion matrix
-def log_confusion_matrix(y_true, y_pred, filename="confusion_matrix.png"):
-    cm = confusion_matrix(y_true, y_pred)
-    if cm.shape == (2, 2):
-        plt.figure(figsize=(5, 4))
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', cbar=False)
-        plt.title("Confusion Matrix")
-        plt.xlabel("Predicted")
-        plt.ylabel("Actual")
-        plt.savefig(filename)
-        plt.close()
-        mlflow.log_artifact(filename)
-    else:
-        print(f"⚠️ Confusion matrix shape {cm.shape} is not 2x2. Skipped logging.")
-
-
 def log_estimator_html(model, filename="estimator.html"):
     with open(filename, "w") as f:
         f.write("<html><body><h2>Best Estimator</h2><pre>")
@@ -73,9 +58,14 @@ def main():
         "XGBoost": (
             XGBClassifier(eval_metric='logloss', n_jobs=1),
             {
-                "max_depth": [3, 5],
-                "learning_rate": [0.1, 0.01],
+                "max_depth": [3, 5, 7],
+                "learning_rate": [0.3, 0.1, 0.01],
                 "n_estimators": [100, 200],
+                "subsample": [0.8, 1.0],
+                "colsample_bytree": [0.8, 1.0],
+                "gamma": [0, 1],
+                "reg_lambda": [1, 10],      # L2 regularization
+                "reg_alpha": [0, 1],        # L1 regularization
             }
         )
     }
@@ -83,15 +73,15 @@ def main():
         for model_name, (model, param_grid) in models_with_params.items():
             print(f"🔍 Tuning model: {model_name}...")
 
-            mlflow.autolog(disable=True)  # Nonaktifkan autolog agar tidak bentrok saat log manual
-
             pipeline = Pipeline([
                 ('scaler', StandardScaler()),
                 ('clf', model)
             ])
 
             param_grid_prefixed = {f"clf__{k}": v for k, v in param_grid.items()}
-            grid = GridSearchCV(pipeline, param_grid=param_grid_prefixed, cv=3, scoring='accuracy', n_jobs=1, error_score='raise')
+            grid = GridSearchCV(pipeline, param_grid=param_grid_prefixed,
+                                cv=3, scoring='accuracy',
+                                n_jobs=1, error_score='raise')
             grid.fit(X_train, y_train)
             best_model = grid.best_estimator_
 
@@ -102,13 +92,20 @@ def main():
             prec = precision_score(y_test, y_pred, average='weighted')
             rec = recall_score(y_test, y_pred, average='weighted')
             f1 = f1_score(y_test, y_pred, average='weighted')
+            tn, fp, fn, tp = confusion_matrix(y_test, y_pred).ravel()
+            specificity = tn / (tn + fp)
+            false_positive_rate = fp / (fp + tn)
+            false_negative_rate = fn / (fn + tp)
 
             mlflow.log_params(grid.best_params_)
             mlflow.log_metrics({
                 f"{model_name}_accuracy": acc,
                 f"{model_name}_precision": prec,
                 f"{model_name}_recall": rec,
-                f"{model_name}_f1_score": f1
+                f"{model_name}_f1_score": f1,
+                f"{model_name}_specificity": specificity,
+                f"{model_name}_false_positive_rate": false_positive_rate,
+                f"{model_name}_false_negative_rate": false_negative_rate,
             })
 
             # 📁 Buat folder artifacts manual
@@ -119,11 +116,6 @@ def main():
             # Simpan classification report
             report_path = artifact_dir / f"{model_name}_classification_report.json"
             log_classification_report(y_test, y_pred, report_path)
-
-            # Simpan confusion matrix
-            # cm_path = artifact_dir / f"{model_name}_confusion_matrix.png"
-            # log_confusion_matrix(y_test, y_pred, cm_path)
-            # mlflow.log_figure(cm.figure_, 'test_confusion_matrix.png')
 
             # Simpan estimator HTML
             html_path = artifact_dir / f"{model_name}_estimator.html"
@@ -139,13 +131,15 @@ def main():
             # saved_model_dir = artifact_dir / f"best_{model_name}_model"
             mlflow.sklearn.log_model(
                 sk_model=best_model,
-                artifact_path=f"{model_name}_mlflow_model",  # ini akan muncul sebagai folder di artifacts
+                artifact_path=f"best_{model_name}_model",  # ini akan muncul sebagai folder di artifacts
                 signature=signature
             )
             # mlflow.sklearn.save_model(best_model, path=str(saved_model_dir), signature=signature)
             # mlflow.log_artifacts(str(saved_model_dir))
 
             print(f"✅ {model_name} selesai dan dicatat ke MLflow.")
+            print(f"🔍 Akurasi: {acc:.4f} | Precision: {prec:.4f} | Recall: {rec:.4f}  | F1-Score: {f1:.4f}")
+            print(f"📈 Specificity: {specificity:.4f} | FPR: {false_positive_rate:.4f} | FPR: {false_negative_rate:.4f}")
 
     print("🎉 Semua model berhasil dituning dan dicatat ke MLflow.")
 
